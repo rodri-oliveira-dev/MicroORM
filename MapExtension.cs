@@ -25,6 +25,19 @@ namespace ClassLibrary.Mapping
         }
 
         /// <summary>
+        /// Mapeia os campos do DataView para o objeto alvo
+        /// </summary>
+        /// <typeparam name="T">Objeto a ser mapeado</typeparam>
+        /// <param name="dv">dados a serem mapeados</param>
+        /// <returns>Lista de objetos mapeados</returns>
+        public static List<T> MapToEntities<T>(this DataView dv) where T : class, new()
+        {
+            var dt = dv.ToTable("Tabela");
+
+            return dt.MapToEntities<T>();
+        }
+
+        /// <summary>
         /// Mapeia os campos do dataReader para o objeto alvo
         /// </summary>
         /// <typeparam name="T">Objeto a ser mapeado</typeparam>
@@ -34,43 +47,38 @@ namespace ClassLibrary.Mapping
         {
             try
             {
-                var objetos = new List<T>();
-                var dadosObjeto = RetornaMapObjeto<T>(dr);
+                var listaNovosObjetos = new List<T>();
+                var camposValidos = RetornaMapObjeto<T>(dr);
 
                 while (dr.Read())
                 {
-                    var objetoAlvo = new T();
+                    var novoObjeto = new T();
 
-                    foreach (var p in dadosObjeto)
+                    foreach (var p in camposValidos)
                     {
-                        if (!dr.HasColumn(p.Name))
-                        {
-                            continue;
-                        }
-
                         var valorDr = dr[p.Name];
 
                         if (valorDr != DBNull.Value)
                         {
                             if (valorDr is TimeSpan && p.PropertyType == typeof(DateTime))
                             {
-                                p.SetValue(objetoAlvo, Convert.ChangeType(valorDr.ToString(), p.PropertyType, System.Globalization.CultureInfo.InvariantCulture), null);
+                                p.SetValue(novoObjeto, Convert.ChangeType(valorDr.ToString(), p.PropertyType, System.Globalization.CultureInfo.InvariantCulture), null);
                             }
                             else if (valorDr is byte[] && p.PropertyType == typeof(string))
                             {
-                                p.SetValue(objetoAlvo, Convert.ChangeType(System.Text.Encoding.Default.GetString((byte[])valorDr), p.PropertyType, System.Globalization.CultureInfo.InvariantCulture), null);
+                                p.SetValue(novoObjeto, Convert.ChangeType(System.Text.Encoding.Default.GetString((byte[])valorDr), p.PropertyType, System.Globalization.CultureInfo.InvariantCulture), null);
                             }
                             else if (valorDr is Guid && p.PropertyType == typeof(string))
                             {
-                                p.SetValue(objetoAlvo, Convert.ChangeType(valorDr.ToString(), p.PropertyType, System.Globalization.CultureInfo.InvariantCulture), null);
+                                p.SetValue(novoObjeto, Convert.ChangeType(valorDr.ToString(), p.PropertyType, System.Globalization.CultureInfo.InvariantCulture), null);
                             }
                             else if (p.PropertyType.IsGenericType && p.PropertyType.GetGenericTypeDefinition() == typeof(Nullable<>) && p.PropertyType.GetGenericArguments()[0].IsEnum)
                             {
-                                p.SetValue(objetoAlvo, Enum.Parse(p.PropertyType.GetGenericArguments()[0], valorDr.ToString()), null);
+                                p.SetValue(novoObjeto, Enum.Parse(p.PropertyType.GetGenericArguments()[0], valorDr.ToString()), null);
                             }
                             else if (!p.PropertyType.IsEnum)
                             {
-                                p.SetValue(objetoAlvo, Nullable.GetUnderlyingType(p.PropertyType) != null
+                                p.SetValue(novoObjeto, Nullable.GetUnderlyingType(p.PropertyType) != null
                                         ? Convert.ChangeType(valorDr, Nullable.GetUnderlyingType(p.PropertyType), System.Globalization.CultureInfo.InvariantCulture)
                                         : Convert.ChangeType(valorDr, p.PropertyType, System.Globalization.CultureInfo.InvariantCulture), null);
                             }
@@ -78,11 +86,11 @@ namespace ClassLibrary.Mapping
                             {
                                 if (valorDr is string)
                                 {
-                                    p.SetValue(objetoAlvo, Enum.Parse(p.PropertyType, valorDr.ToString()), null);
+                                    p.SetValue(novoObjeto, Enum.Parse(p.PropertyType, valorDr.ToString()), null);
                                 }
                                 else
                                 {
-                                    p.SetValue(objetoAlvo, Enum.ToObject(p.PropertyType, valorDr), null);
+                                    p.SetValue(novoObjeto, Enum.ToObject(p.PropertyType, valorDr), null);
                                 }
                             }
                         }
@@ -90,20 +98,20 @@ namespace ClassLibrary.Mapping
                         {
                             if ((p.PropertyType.IsGenericType && p.PropertyType.GetGenericTypeDefinition() == typeof(Nullable<>)))
                             {
-                                p.SetValue(objetoAlvo, null, null);
+                                p.SetValue(novoObjeto, null, null);
                             }
                             else
                             {
-                                p.SetValue(objetoAlvo, !p.PropertyType.IsValueType
+                                p.SetValue(novoObjeto, !p.PropertyType.IsValueType
                                     ? null
                                     : Activator.CreateInstance(p.PropertyType), null);
                             }
                         }
                     }
-                    objetos.Add(objetoAlvo);
+                    listaNovosObjetos.Add(novoObjeto);
                 }
 
-                return objetos;
+                return listaNovosObjetos;
 
             }
             catch
@@ -116,7 +124,7 @@ namespace ClassLibrary.Mapping
         {
             if (dr != null)
             {
-                return typeof (T).GetProperties().ToList();
+                return typeof(T).GetProperties().Where(p => p.CanWrite && dr.HasColumn(p.Name)).ToList();
             }
             
             throw new ArgumentNullException("dr","DataReader não pode ser nulo");
