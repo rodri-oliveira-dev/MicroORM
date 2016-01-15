@@ -3,13 +3,15 @@ using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Reflection;
-using System.Security.Permissions;
+using DataDrain.Caching;
 
-namespace ClassLibrary.Mapping
+
+namespace DataDrain.Mapping
 {
-    [ReflectionPermission(SecurityAction.Assert, MemberAccess = true)]
-    public static class Map
+    internal static class Map
     {
+        private static readonly CachingMannager Cache = new CachingMannager(new TimeSpan(0, 0, 5, 0));
+
 
         /// <summary>
         /// Mapeia os campos do DataTable para o objeto alvo
@@ -50,6 +52,8 @@ namespace ClassLibrary.Mapping
                 var listaNovosObjetos = new List<T>();
                 var camposValidos = RetornaMapObjeto<T>(dr);
 
+                var setters = RetornaSetters<T>(camposValidos);
+
                 while (dr.Read())
                 {
                     var novoObjeto = new T();
@@ -58,39 +62,42 @@ namespace ClassLibrary.Mapping
                     {
                         var valorDr = dr[p.Name];
 
+                        var setter = setters[p.Name];
+
                         if (valorDr != DBNull.Value)
                         {
                             if (valorDr is TimeSpan && p.PropertyType == typeof(DateTime))
                             {
-                                p.SetValue(novoObjeto, Convert.ChangeType(valorDr.ToString(), p.PropertyType, System.Globalization.CultureInfo.InvariantCulture), null);
+
+                                setter(novoObjeto, Convert.ChangeType(valorDr.ToString(), p.PropertyType, System.Globalization.CultureInfo.InvariantCulture));
                             }
                             else if (valorDr is byte[] && p.PropertyType == typeof(string))
                             {
-                                p.SetValue(novoObjeto, Convert.ChangeType(System.Text.Encoding.Default.GetString((byte[])valorDr), p.PropertyType, System.Globalization.CultureInfo.InvariantCulture), null);
+                                setter(novoObjeto, Convert.ChangeType(System.Text.Encoding.Default.GetString((byte[])valorDr), p.PropertyType, System.Globalization.CultureInfo.InvariantCulture));
                             }
                             else if (valorDr is Guid && p.PropertyType == typeof(string))
                             {
-                                p.SetValue(novoObjeto, Convert.ChangeType(valorDr.ToString(), p.PropertyType, System.Globalization.CultureInfo.InvariantCulture), null);
+                                setter(novoObjeto, Convert.ChangeType(valorDr.ToString(), p.PropertyType, System.Globalization.CultureInfo.InvariantCulture));
                             }
                             else if (p.PropertyType.IsGenericType && p.PropertyType.GetGenericTypeDefinition() == typeof(Nullable<>) && p.PropertyType.GetGenericArguments()[0].IsEnum)
                             {
-                                p.SetValue(novoObjeto, Enum.Parse(p.PropertyType.GetGenericArguments()[0], valorDr.ToString()), null);
+                                setter(novoObjeto, Enum.Parse(p.PropertyType.GetGenericArguments()[0], valorDr.ToString()));
                             }
                             else if (!p.PropertyType.IsEnum)
                             {
-                                p.SetValue(novoObjeto, Nullable.GetUnderlyingType(p.PropertyType) != null
+                                setter(novoObjeto, Nullable.GetUnderlyingType(p.PropertyType) != null
                                         ? Convert.ChangeType(valorDr, Nullable.GetUnderlyingType(p.PropertyType), System.Globalization.CultureInfo.InvariantCulture)
-                                        : Convert.ChangeType(valorDr, p.PropertyType, System.Globalization.CultureInfo.InvariantCulture), null);
+                                        : Convert.ChangeType(valorDr, p.PropertyType, System.Globalization.CultureInfo.InvariantCulture));
                             }
                             else if (p.PropertyType.IsEnum)
                             {
                                 if (valorDr is string)
                                 {
-                                    p.SetValue(novoObjeto, Enum.Parse(p.PropertyType, valorDr.ToString()), null);
+                                    setter(novoObjeto, Enum.Parse(p.PropertyType, valorDr.ToString()));
                                 }
                                 else
                                 {
-                                    p.SetValue(novoObjeto, Enum.ToObject(p.PropertyType, valorDr), null);
+                                    setter(novoObjeto, Enum.ToObject(p.PropertyType, valorDr));
                                 }
                             }
                         }
@@ -98,13 +105,13 @@ namespace ClassLibrary.Mapping
                         {
                             if ((p.PropertyType.IsGenericType && p.PropertyType.GetGenericTypeDefinition() == typeof(Nullable<>)))
                             {
-                                p.SetValue(novoObjeto, null, null);
+                                setter(novoObjeto, null);
                             }
                             else
                             {
-                                p.SetValue(novoObjeto, !p.PropertyType.IsValueType
+                                setter(novoObjeto, !p.PropertyType.IsValueType
                                     ? null
-                                    : Activator.CreateInstance(p.PropertyType), null);
+                                    : Activator.CreateInstance(p.PropertyType));
                             }
                         }
                     }
@@ -116,8 +123,25 @@ namespace ClassLibrary.Mapping
             }
             catch
             {
-                throw;
+                throw new Exception();
             }
+        }
+
+
+        private static Dictionary<string, Action<T, object>> RetornaSetters<T>(IEnumerable<PropertyInfo> camposValidos)
+        {
+            var map = Cache.Recuperar<Dictionary<string, Dictionary<string, Action<T, object>>>>("map").Value ?? new Dictionary<string, Dictionary<string, Action<T, object>>>();
+
+            var mapObjAtual = camposValidos.ToDictionary(camposValido => camposValido.Name, FastInvoke.BuildUntypedSetter<T>);
+
+            if (map.ContainsKey(typeof(T).FullName))
+            {
+                return map[typeof(T).FullName];
+            }
+
+            map.Add(typeof(T).FullName, mapObjAtual);
+            Cache.Adicionar("map", map);
+            return mapObjAtual;
         }
 
         private static List<PropertyInfo> RetornaMapObjeto<T>(IDataRecord dr) where T : new()
@@ -126,8 +150,8 @@ namespace ClassLibrary.Mapping
             {
                 return typeof(T).GetProperties().Where(p => p.CanWrite && dr.HasColumn(p.Name)).ToList();
             }
-            
-            throw new ArgumentNullException("dr","DataReader não pode ser nulo");
+
+            throw new ArgumentNullException("dr", "DataReader não pode ser nulo");
         }
 
         private static bool HasColumn(this IDataRecord dr, string columnName)
