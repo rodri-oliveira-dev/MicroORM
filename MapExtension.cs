@@ -130,7 +130,7 @@ namespace DataDrain.Mapping
 
         private static Dictionary<string, Action<T, object>> RetornaSetters<T>(IEnumerable<PropertyInfo> camposValidos)
         {
-            var map = Cache.Recuperar<Dictionary<string, Dictionary<string, Action<T, object>>>>("map").Value ?? new Dictionary<string, Dictionary<string, Action<T, object>>>();
+            var map = Cache.Recuperar<Dictionary<string, Dictionary<string, Action<T, object>>>>(typeof(T).FullName).Value ?? new Dictionary<string, Dictionary<string, Action<T, object>>>();
 
             var mapObjAtual = camposValidos.ToDictionary(camposValido => camposValido.Name, FastInvoke.BuildUntypedSetter<T>);
 
@@ -140,7 +140,7 @@ namespace DataDrain.Mapping
             }
 
             map.Add(typeof(T).FullName, mapObjAtual);
-            Cache.Adicionar("map", map);
+            Cache.Adicionar(typeof(T).FullName, map);
             return mapObjAtual;
         }
 
